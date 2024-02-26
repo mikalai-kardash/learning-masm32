@@ -1,5 +1,9 @@
 include main.inc
 
+.data
+    szRomanNumber db 16 dup(0)
+    dwRomanNumberSize dd 16
+
 .code
 start:
     call main
@@ -11,9 +15,9 @@ start:
 
 main proc
 
-    printf("\n")
     ;-------------
-    call number_to_roman
+    fn number_to_roman
+    ;fn roman_to_number,chr$("IX"),3
     ;-------------
     inkey
     ;-------------
