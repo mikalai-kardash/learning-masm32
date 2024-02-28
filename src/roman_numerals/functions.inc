@@ -10,7 +10,16 @@ division              proto :dword,:dword,:dword
 
 .code
 
-roman_to_number proc uses ebx esi edi lpBuffer:dword, nsize:dword
+;-------------------------------------------------
+;
+;   Returns number for provided roman numeral.
+;
+;   - lpBuffer : address of a string buffer that 
+;                contains roman numeral (ex.: "XIII", 0)
+;   - nsize    : number of characters in the buffer 
+;
+;-------------------------------------------------
+roman_to_number proc uses ebx esi lpBuffer:dword, nsize:dword
     LOCAL current:dword
     LOCAL prev:dword
     LOCAL result:dword
@@ -21,27 +30,49 @@ roman_to_number proc uses ebx esi edi lpBuffer:dword, nsize:dword
     and result, 0
     and number_of_chars, 0
 
-  
+;-------------------------------------------------
+;   Push all charecters from buffer onto stack.
+;-------------------------------------------------
 @@:
+    ; end of string check
     cmp byte ptr[esi+ebx], 0
     jz @F
+    
+    ; push char onto stack
     movzx eax, byte ptr[esi+ebx]
     push eax
     
+    ; increase counter
     inc ebx
+    
+    ; check nsize buffer limit
     cmp ebx, nsize
     je @F
-    jne @B 
+    jmp @B 
     
-
+    
+;-------------------------------------------------
+;   Pop all chars from the stack starting from
+;   the last one.
+;
+;   1. If current > prev, the resulting 
+;      number is increased. For "XI", 
+;      current is "X" and prev is "I".
+;
+;   2. If current < prev, the resulting 
+;      number is decreased. For "VX", 
+;      current is "V" and prev is "X".
+;
+;-------------------------------------------------
 @@: 
     mov number_of_chars, ebx
     dec number_of_chars
     
-    
+    ; add last symbol to result
     pop prev
     add result, rv(get_number,prev)
     
+    ; single-number roman numeral check
     cmp number_of_chars, 0
     jz @@ret
     
@@ -61,8 +92,11 @@ roman_to_number proc uses ebx esi edi lpBuffer:dword, nsize:dword
     add result, rv(get_number,current)
 
 @@loop_end:
+    ; prev = current
     push current
     pop prev
+    
+    ; iterate until no more characters left
     cmp number_of_chars, 0
     je @F   
     jmp @@loop
@@ -74,12 +108,24 @@ roman_to_number proc uses ebx esi edi lpBuffer:dword, nsize:dword
 roman_to_number endp
 
 
+;-------------------------------------------------
+;
+;   Compares two roman numerals. Returns number 
+;   representing answer if a > b or else.
+;
+;   - a, b : ASCII codes of roman numerals.
+;   - if a > b returns 1
+;        a < b        -1
+;        a = b         0
+;
+;-------------------------------------------------
 compare_roman_numbers proc a:dword, b:dword
     local a_result:dword
     local b_result:dword
     
     mov a_result, rv(get_number,a)
     mov b_result, rv(get_number,b)
+    
     mov eax, a_result
     cmp eax, b_result
     jg @@more
@@ -103,6 +149,17 @@ compare_roman_numbers proc a:dword, b:dword
 compare_roman_numbers endp
 
 
+;-------------------------------------------------
+;   MACRO: Verify if variable represents roman 
+;          numberal and assign eax with number 
+;          in this case.
+;
+;   - variable    : ASCII code, symbol
+;   - romanNumber : ASCII code, for example: 'I', 'X', etc.
+;   - number      : numeric value representing roman numeral
+;                   (5 for 'V', for example).
+;
+;-------------------------------------------------
 verify macro variable, romanNumber, number
 
 @@: cmp variable, romanNumber
@@ -113,6 +170,14 @@ verify macro variable, romanNumber, number
 endm
 
 
+;-------------------------------------------------
+;
+;   Returns number for roman numeral (provides 10 
+;   for 'X').
+;
+;   - roman : ASCII code, for example: 'I', 'X', etc.
+;
+;-------------------------------------------------
 get_number proc roman:dword
     xor eax, eax
     
@@ -254,7 +319,7 @@ division endp
 
 ;------------------------------------------
 ;
-;    Appends roman literal to a buffer
+;    MACRO: Appends roman literal to a buffer
 ;    if number matches.
 ;
 ;    - number   : arabic digit
