@@ -1,6 +1,12 @@
-roman_to_number proto :dword,:dword
-get_number proto :dword
+roman_to_number       proto :dword,:dword
+get_number            proto :dword
 compare_roman_numbers proto :dword,:dword
+clear_buffer          proto :dword,:dword
+set_thousands         proto :dword,:dword,:dword,:dword
+set_hundreds          proto :dword,:dword,:dword,:dword
+set_tens              proto :dword,:dword,:dword,:dword
+set_digit             proto :dword,:dword,:dword,:dword
+division              proto :dword,:dword,:dword
 
 .code
 
@@ -97,135 +103,118 @@ compare_roman_numbers proc a:dword, b:dword
 compare_roman_numbers endp
 
 
+verify macro variable, romanNumber, number
+
+@@: cmp variable, romanNumber
+    jne @F
+    mov eax, number
+    jmp @@ret
+    
+endm
+
+
 get_number proc roman:dword
     xor eax, eax
     
-@@: cmp roman, 'M'
-    jne @F
-    mov eax, 1000
-    jmp @@ret
-    
-@@: cmp roman, 'D'
-    jne @F
-    mov eax, 500
-    jmp @@ret
-    
-@@: cmp roman, 'C'
-    jne @F
-    mov eax, 100
-    jmp @@ret
-    
-@@: cmp roman, 'L'
-    jne @F
-    mov eax, 50
-    jmp @@ret
-    
-@@: cmp roman, 'X'
-    jne @F
-    mov eax, 10
-    jmp @@ret
-    
-@@: cmp roman, 'V'
-    jne @F
-    mov eax, 5
-    jmp @@ret
-    
-@@: cmp roman, 'I'
-    jne @F
-    mov eax, 1
-    jmp @@ret
+    verify roman, 'M', 1000
+    verify roman, 'D', 500
+    verify roman, 'C', 100
+    verify roman, 'L', 50
+    verify roman, 'X', 10
+    verify roman, 'V', 5
+    verify roman, 'I', 1
     
 @@:
 @@ret:
 	ret 4
 get_number endp
 
-number_to_roman proc uses ebx ecx edx esi
+
+;-------------------------------------------------
+;   Iterating over range of digits 1..3999.
+;
+;   1. Sequentially converts number to roman 
+;      numeral (string buffer).
+;   2. Converts string numeral back to digit form.
+;
+;-------------------------------------------------
+number_to_roman proc uses ebx
+    ;--------------
     local buffer[16]:byte
     local buffer_len:dword
     local pos:dword
-    
+    local remainder:dword
+    local number:dword
+    ;--------------
+
     mov buffer_len, 16
     mov ebx, 0
-    
-@@number: 
+
+@@number:
     inc ebx
-    lea esi, buffer
-    push buffer_len
-    push esi
-    ;------
-    call clear_buffer
+    ;--------------
     mov pos, 0
-    ;------
+    mov number, ebx
+    ;--------------
+    fn clear_buffer, addr buffer, buffer_len
     
-    mov eax, ebx
-    xor edx, edx
-    mov ecx, 1000
-    div ecx
+    ; divide by 1000
+    mov number, rv(division, number, 1000, addr remainder)
+    cmp number, 0
+    jz @f
+   
+    ; decode number to roman representation if > 0
+    mov pos, rv(set_thousands, addr buffer, buffer_len, pos, number)
     
-    cmp eax, 0
-    jz @F
+@@: 
+    push remainder
+    pop number
     
-    push eax
-    push pos
-    push buffer_len
-    push esi
-    call set_thousands
-    mov pos, eax
+    ; divide by 100
+    mov number, rv(division, number, 100, addr remainder)
+    cmp number, 0
+    jz @f
     
-    
-    
-@@: mov eax, edx
-    xor edx, edx
-    mov ecx, 100
-    div ecx
-    
-    cmp eax, 0
-    jz @F
-    
-    push eax
-    push pos
-    push buffer_len
-    push esi
-    call set_hundreds
-    mov pos, eax
+    ; decode number to roman representation if > 0
+    mov pos, rv(set_hundreds, addr buffer, buffer_len, pos, number)
     
     
-@@: mov eax, edx
-    xor edx, edx
-    mov ecx, 10
-    div ecx
+@@: 
+    push remainder
+    pop number
     
-    cmp eax, 0
-    jz @F
+    ;divide by 10
+    mov number, rv(division, number, 10, addr remainder)
+    cmp number, 0
+    jz @f
     
-    push eax
-    push pos
-    push buffer_len
-    push esi
-    call set_tens
-    mov pos, eax
-    
-@@: mov eax, edx
-    
-    push eax
-    push pos
-    push buffer_len
-    push esi
-    call set_digit
+    ; decode number to roman representation if > 0
+    mov pos, rv(set_tens, addr buffer, buffer_len, pos, number)
     
     
-    ;printf("%s\n", esi)
-    mov eax, rv(roman_to_number,esi,16)
-    cmp eax, ebx
+@@: 
+    ; remainder is the number
+    ; decode it to roman representation if > 0
+    mov pos, rv(set_digit, addr buffer, buffer_len, pos, remainder)
+    
+    ; buffer is containing roman number now
+    ; reverse roman representation to number
+    mov number, rv(roman_to_number, addr buffer, buffer_len)
+    
+    ; compare ebx (original number) with 
+    ; decoded-encoded value (number > roman numeral > number)
+    cmp ebx, number
     jz @@equal
-    
+
+
 @@not_equal:
-    printf("expected '%d', but got '%d' [%s]\n", ebx, eax, esi)
+    ; display text suggesting something went wrong
+    printf("expected '%d', but got '%d' [%s]\n", ebx, number, addr buffer)
     jmp @@number_end
 
 @@equal:
-    printf("%d = %s\n", eax, esi)
+    ; display number and its roman numeral representation
+    printf("%d = %s\n", number, addr buffer)
 
 @@number_end:
     cmp ebx, 3999
@@ -236,377 +225,184 @@ number_to_roman proc uses ebx ecx edx esi
 number_to_roman endp
 
 
-set_thousands proc; lpBuffer, lSize, lPos, lNumber -> new pos
-    lpBuffer equ dword ptr[ebp+08h]
-    lSize    equ dword ptr[ebp+0Ch]
-    lPos     equ dword ptr[ebp+10h]
-    lNumber  equ dword ptr[ebp+14h]
+;------------------------------------------
+;
+;    Divides the number. Result is returned
+;    via eax. Remainder is returned via 
+;    pointer to remainder variable (pRemainder).
+;
+;    - number     : number to divide
+;    - divider    : divisor, will devide number by it
+;    - pRemainder : address of variable that 
+;                   is going to receive remainder value
+;
+;------------------------------------------
+division proc uses ebx esi number:dword, divider:dword, pRemainder:dword
+    mov eax, number
+    xor edx, edx
+    mov ebx, divider
+    div ebx
     
-    ;-----
-    push ebp
-    mov ebp, esp
-    push ebx
-    push edx
-    push esi
-    push edi
-    ;-----
+    ; transfer remainer to address
+    mov esi, pRemainder
+    mov [esi], edx
+
+@@ret:
+	ret 12
+division endp
+
+
+;------------------------------------------
+;
+;    Appends roman literal to a buffer
+;    if number matches.
+;
+;    - number   : arabic digit
+;    - roman    : roman literal (ex.: "I", "V", etc.)
+;    - pBuffer  : address of string buffer
+;    - position : position at which to append 
+;                 roman literal
+;
+;------------------------------------------
+append_matching_digit macro number, roman, pBuffer, position
+
+@@: cmp ebx, number
+    jnz @F
+    test eax, append$(pBuffer, roman, position)
+    jmp @@ret
+
+endm
+
+
+;------------------------------------------
+;
+;   Appends roman numeral representing a
+;   thousand if number matches.
+;
+;   - lpBuffer: address of a string buffer
+;   - lSize   : number of bytes in buffer
+;   - lPos    : position in a buffer where new
+;               symbols can be appended
+;   - lNumber : number of thousands            
+;
+;------------------------------------------
+set_thousands proc uses ebx lpBuffer:dword, lSize:dword, lPos:dword, lNumber:dword
     mov ebx, lNumber
     ;-----
     cmp ebx, 0
     jz @@ret
     
-    
-@@: cmp ebx, 1
-    jnz @F
-    
-    and eax, append$(lpBuffer, "M", lPos)
-    jmp @@ret
-
-
-@@: cmp ebx, 2
-    jnz @F
-    
-    and eax, append$(lpBuffer, "MM", lPos)
-    jmp @@ret
-
-
-@@: cmp ebx, 3
-    jnz @F
-    
-    and eax, append$(lpBuffer, "MMM", lPos)
-    jmp @@ret
-    
-
+    ; TODO: use lSize to avoid 
+    ;       overflowing the buffer (lpBuffer).
+    append_matching_digit 1, "M",   lpBuffer, lPos
+    append_matching_digit 2, "MM",  lpBuffer, lPos
+    append_matching_digit 3, "MMM", lpBuffer, lPos
+   
 @@:  
 @@ret:
-    pop edi
-    pop esi
-    pop edx
-    pop ebx
-    mov esp, ebp
-    pop ebp    
-
 	ret 16
 set_thousands endp
 
 
-set_hundreds proc; lpBuffer, lSize, lPos, lNumber -> new pos
-    lpBuffer equ dword ptr[ebp+08h]
-    lSize    equ dword ptr[ebp+0Ch]
-    lPos     equ dword ptr[ebp+10h]
-    lNumber  equ dword ptr[ebp+14h]
-    
-    ;-----
-    push ebp
-    mov ebp, esp
-    push ebx
-    push edx
-    push esi
-    push edi
-    ;-----
+set_hundreds proc uses ebx lpBuffer:dword, lSize:dword, lPos:dword, lNumber:dword
     mov ebx, lNumber
     ;-----
     cmp ebx, 0
     jz @@ret
 
-
-@@: cmp ebx, 1
-    jnz @F
-    
-    and eax, append$(lpBuffer, "C", lPos)
-    jmp @@ret
-
-
-@@: cmp ebx, 2
-    jnz @F
-    
-    and eax, append$(lpBuffer, "CC", lPos)
-    jmp @@ret
-
-
-@@: cmp ebx, 3
-    jnz @F
-    
-    and eax, append$(lpBuffer, "CCC", lPos)
-    jmp @@ret
-    
-
-@@: cmp ebx, 4
-    jnz @F
-    
-    and eax, append$(lpBuffer, "CD", lPos)
-    jmp @@ret
-
-   
-@@: cmp ebx, 5
-    jnz @F
-    
-    and eax, append$(lpBuffer, "D", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 6
-    jnz @F
-    
-    and eax, append$(lpBuffer, "DC", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 7
-    jnz @F
-    
-    and eax, append$(lpBuffer, "DCC", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 8
-    jnz @F
-    
-    and eax, append$(lpBuffer, "DCCC", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 9
-    jnz @F
-    
-    and eax, append$(lpBuffer, "CM", lPos)
-    jmp @@ret
+    ; TODO: use lSize to avoid 
+    ;       overflowing the buffer (lpBuffer).
+    append_matching_digit 1, "C", lpBuffer, lPos
+    append_matching_digit 2, "CC", lpBuffer, lPos
+    append_matching_digit 3, "CCC", lpBuffer, lPos
+    append_matching_digit 4, "CD", lpBuffer, lPos
+    append_matching_digit 5, "D", lpBuffer, lPos
+    append_matching_digit 6, "DC", lpBuffer, lPos
+    append_matching_digit 7, "DCC", lpBuffer, lPos
+    append_matching_digit 8, "DCCC", lpBuffer, lPos
+    append_matching_digit 9, "CM", lpBuffer, lPos
 
 
 @@:  
 @@ret:
-    pop edi
-    pop esi
-    pop edx
-    pop ebx
-    mov esp, ebp
-    pop ebp    
-
 	ret 16
 set_hundreds endp
 
 
-set_tens proc; lpBuffer, lSize, lPos, lNumber -> new pos
-    lpBuffer equ dword ptr[ebp+08h]
-    lSize    equ dword ptr[ebp+0Ch]
-    lPos     equ dword ptr[ebp+10h]
-    lNumber  equ dword ptr[ebp+14h]
-    
-    ;-----
-    push ebp
-    mov ebp, esp
-    push ebx
-    push edx
-    push esi
-    push edi
-    ;-----
+set_tens proc uses ebx lpBuffer:dword, lSize:dword, lPos:dword, lNumber:dword
     mov ebx, lNumber
     ;-----
     cmp ebx, 0
     jz @@ret
     
-    
-@@: cmp ebx, 1
-    jnz @F
-    
-    and eax, append$(lpBuffer, "X", lPos)
-    jmp @@ret
-
-
-@@: cmp ebx, 2
-    jnz @F
-    
-    and eax, append$(lpBuffer, "XX", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 3
-    jnz @F
-    
-    and eax, append$(lpBuffer, "XXX", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 4
-    jnz @F
-    
-    and eax, append$(lpBuffer, "XL", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 5
-    jnz @F
-    
-    and eax, append$(lpBuffer, "L", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 6
-    jnz @F
-    
-    and eax, append$(lpBuffer, "LX", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 7
-    jnz @F
-    
-    and eax, append$(lpBuffer, "LXX", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 8
-    jnz @F
-    
-    and eax, append$(lpBuffer, "LXXX", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 9
-    jnz @F
-    
-    and eax, append$(lpBuffer, "XC", lPos)
-    jmp @@ret
+    ; TODO: use lSize to avoid 
+    ;       overflowing the buffer (lpBuffer).
+    append_matching_digit 1, "X", lpBuffer, lPos
+    append_matching_digit 2, "XX", lpBuffer, lPos
+    append_matching_digit 3, "XXX", lpBuffer, lPos
+    append_matching_digit 4, "XL", lpBuffer, lPos
+    append_matching_digit 5, "L", lpBuffer, lPos
+    append_matching_digit 6, "LX", lpBuffer, lPos
+    append_matching_digit 7, "LXX", lpBuffer, lPos
+    append_matching_digit 8, "LXXX", lpBuffer, lPos
+    append_matching_digit 9, "XC", lpBuffer, lPos
     
 @@:  
 @@ret:
-    pop edi
-    pop esi
-    pop edx
-    pop ebx
-    mov esp, ebp
-    pop ebp    
-
-	ret 16
+    ret 16
 set_tens endp
 
 
-set_digit proc; lpBuffer, lSize, lPos, lNumber -> new pos
-    lpBuffer equ dword ptr[ebp+08h]
-    lSize    equ dword ptr[ebp+0Ch]
-    lPos     equ dword ptr[ebp+10h]
-    lNumber  equ dword ptr[ebp+14h]
-    
-    ;-----
-    push ebp
-    mov ebp, esp
-    push ebx
-    push esi
-    push edi
-    ;-----
-    
+set_digit proc uses ebx lpBuffer:dword, lSize:dword, lPos:dword, lNumber:dword
     mov ebx, lNumber
     ;-----
     cmp ebx, 0
     jz @@ret
-    
-    
-@@: cmp ebx, 1
-    jnz @F
-    
-    and eax, append$(lpBuffer, "I", lPos)
-    jmp @@ret
 
-
-@@: cmp ebx, 2
-    jnz @F
+    ; TODO: use lSize to avoid 
+    ;       overflowing the buffer (lpBuffer).
+    append_matching_digit 1, "I", lpBuffer, lPos
+    append_matching_digit 2, "II", lpBuffer, lPos
+    append_matching_digit 3, "III", lpBuffer, lPos
+    append_matching_digit 4, "IV", lpBuffer, lPos
+    append_matching_digit 5, "V", lpBuffer, lPos
+    append_matching_digit 6, "VI", lpBuffer, lPos
+    append_matching_digit 7, "VII", lpBuffer, lPos
+    append_matching_digit 8, "VIII", lpBuffer, lPos
+    append_matching_digit 9, "IX", lpBuffer, lPos
     
-    and eax, append$(lpBuffer, "II", lPos)
-    jmp @@ret
-    
-
-@@: cmp ebx, 3
-    jnz @F
-    
-    and eax, append$(lpBuffer, "III", lPos)
-    jmp @@ret
-    
-
-@@: cmp ebx, 4
-    jnz @F
-    
-    and eax, append$(lpBuffer, "IV", lPos)
-    jmp @@ret
-    
-@@: cmp ebx, 5
-    jnz @F
-    
-    and eax, append$(lpBuffer, "V", lPos)
-    jmp @@ret
-    
-
-@@: cmp ebx, 6
-    jnz @F
-    
-    and eax, append$(lpBuffer, "VI", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 7
-    jnz @F
-    
-    and eax, append$(lpBuffer, "VII", lPos)
-    jmp @@ret
-
-
-@@: cmp ebx, 8
-    jnz @F
-    
-    and eax, append$(lpBuffer, "VIII", lPos)
-    jmp @@ret
-    
-    
-@@: cmp ebx, 9
-    jnz @F
-    
-    and eax, append$(lpBuffer, "IX", lPos)
-    jmp @@ret
-    
-   
 @@:  
 @@ret:
-    pop edi
-    pop esi
-    pop ebx
-    mov esp, ebp
-    pop ebp    
-
 	ret 16
 set_digit endp
 
 
-clear_buffer proc; lpBuffer, usize
-    lpBuffer    equ dword ptr[ebp+8]
-    lSize       equ dword ptr[ebp+12]
-    
-    ;-------
-    push ebp
-    mov ebp, esp
-    ;-------
-    push ebx
-    push esi
-    push edi
-    ;-------
-    
+;------------------------------------------
+;
+;   Set all symbols in buffer to zero. It
+;   is working on 16 bytes at once.
+;
+;   - lpBuffer: address of a string buffer
+;   - lSize   : number of bytes in buffer
+;               should be power of 16
+;
+;------------------------------------------
+clear_buffer proc uses ebx esi lpBuffer:dword, lSize:dword
     mov ebx, lSize
+    shr ebx, 4
     mov esi, lpBuffer
+    mov eax, 0
     
 @@:
+    mov [esi], eax
+    mov [esi+4], eax
+    mov [esi+8], eax
+    mov [esi+12], eax
+
+    add esi, 16
     dec ebx
-    mov byte ptr[esi+ebx], 0
-    and ebx, ebx
     jnz @B
 
-    ;-------
 @@ret:
-    ;-------
-    pop edi
-    pop esi
-    pop ebx
-    ;-------
-    mov esp, ebp
-    pop ebp
-    ;-------
 	ret 8
 clear_buffer endp
-
